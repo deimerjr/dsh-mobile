@@ -1,0 +1,14 @@
+{
+  "appId": "io.github.deimerjr.dshmobile",
+  "appName": "DSH Mobile",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "*"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

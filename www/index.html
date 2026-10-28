@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>DSH Mobile</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0f14; --card:#111a24; --line:#1e2c3b; --text:#e7eef6; --muted:#93a4b7; --accent:#4c8dff; --ok:#39d98a; --warn:#f0c674; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; }
+  body { background:radial-gradient(1200px 600px at 50% -10%, #16263a 0%, var(--bg) 55%);
+         color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         display:flex; flex-direction:column; padding:calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom)); }
+  .brand { display:flex; align-items:center; gap:10px; margin-bottom:18px; }
+  .logo { width:42px; height:42px; border-radius:12px; background:linear-gradient(145deg,#2b6df6,#7fb2ff); display:grid; place-items:center; font-weight:800; color:#fff; letter-spacing:.5px; }
+  h1 { font-size:19px; margin:0; font-weight:650; }
+  .sub { color:var(--muted); font-size:13px; margin:2px 0 0; }
+  .card { background:color-mix(in srgb, var(--card) 88%, transparent); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:14px; }
+  .label { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:6px; }
+  .target { font-size:14px; word-break:break-all; color:var(--text); }
+  .target.empty { color:var(--muted); font-style:italic; }
+  input[type=url] { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:#0a1119; color:var(--text); font-size:14px; }
+  input::placeholder { color:#5d7288; }
+  .row { display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  button { flex:1 1 auto; padding:13px 16px; border-radius:12px; border:0; font-size:15px; font-weight:600; cursor:pointer; }
+  button:active { transform:scale(.99); }
+  .primary { background:var(--accent); color:#fff; }
+  .ghost { background:#16222f; color:var(--text); border:1px solid var(--line); }
+  .danger { background:transparent; color:#ff8b8b; border:1px solid #40222a; }
+  .full { width:100%; margin-top:12px; }
+  .hint { color:var(--muted); font-size:12px; margin-top:10px; }
+  .toast { position:fixed; left:18px; right:18px; bottom:calc(18px + env(safe-area-inset-bottom)); padding:12px 14px; border-radius:12px;
+           background:#3a1d24; border:1px solid #5c2b36; color:#ffd9dd; font-size:13px; display:none; }
+  .toast.show { display:block; }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid #ffffff55; border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .tag { display:inline-block; font-size:11px; padding:3px 8px; border-radius:999px; background:#16222f; border:1px solid var(--line); color:var(--muted); }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <div class="logo">DSH</div>
+    <div>
+      <h1>DSH Mobile</h1>
+      <p class="sub">Controla tu DeepSeek Harness desde el movil</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Destino</div>
+    <div id="target" class="target empty">Sin configurar</div>
+    <div class="row" id="actionsConnect" style="display:none">
+      <button class="primary" id="btnConnect">Conectar</button>
+      <button class="ghost" id="btnForget">Olvidar</button>
+    </div>
+  </div>
+
+  <div class="card" id="pairCard">
+    <div class="label">Emparejar</div>
+    <input id="urlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+           placeholder="https://mi-pc.tailnet.ts.net/?token=...">
+    <div class="row">
+      <button class="primary" id="btnSave">Guardar y conectar</button>
+    </div>
+    <div class="row">
+      <button class="ghost" id="btnScan">Escanear QR</button>
+    </div>
+    <p class="hint">Genera el QR en el PC con <b>start-mobile.ps1</b>. Activa Tailscale en el telefono y usa HTTPS si esta disponible.</p>
+  </div>
+
+  <div class="card">
+    <div class="label">Seguridad</div>
+    <div class="row" style="align-items:center">
+      <span class="tag" id="bioTag">Biometria: comprobando...</span>
+      <button class="ghost" id="btnBio" style="flex:0 0 auto; padding:8px 12px; font-size:13px">Probar</button>
+    </div>
+    <p class="hint">Si el dispositivo tiene huella o rostro, se pedira antes de conectar.</p>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  var Cap = window.Capacitor;
+  var Plugins = (Cap && Cap.Plugins) || {};
+  function pick(names) { for (var i = 0; i < names.length; i++) { if (Plugins[names[i]]) return Plugins[names[i]]; } return null; }
+  var PrefP = pick(['Preferences']);
+  var ScanP = pick(['BarcodeScanner','CapacitorBarcodeScanner']);
+  var BioP  = pick(['BiometricAuth','BiometricAuthNative']);
+  var OpenP = pick(['OpenUrl']);
+  var isNative = !!(Cap && Cap.isNativePlatform && Cap.isNativePlatform());
+  var KEY = 'dsh.serverUrl';
+  var AUTO = 'dsh.autoBiometric';
+  var state = { url: '', bioAvailable: false };
+
+  function $(id) { return document.getElementById(id); }
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('show'); }, 4200);
+  }
+  function pretty(u) {
+    try { var x = new URL(u); return x.host + (x.pathname && x.pathname !== '/' ? x.pathname : ''); }
+    catch (e) { return u; }
+  }
+  function validUrl(u) {
+    try { var x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.href : null; }
+    catch (e) { return null; }
+  }
+  async function load() {
+    try {
+      if (PrefP) {
+        var r = await PrefP.get({ key: KEY });
+        state.url = r && r.value ? r.value : '';
+      } else if (isNative) {
+        state.url = localStorage.getItem(KEY) || '';
+      } else {
+        state.url = localStorage.getItem(KEY) || '';
+      }
+    } catch (e) { state.url = localStorage.getItem(KEY) || ''; }
+    render();
+  }
+  async function save(u) {
+    state.url = u;
+    try {
+      if (PrefP) await PrefP.set({ key: KEY, value: u });
+      else localStorage.setItem(KEY, u);
+    } catch (e) { try { localStorage.setItem(KEY, u); } catch (_) {} }
+    render();
+  }
+  async function forget() {
+    state.url = '';
+    try {
+      if (PrefP) await PrefP.remove({ key: KEY });
+      localStorage.removeItem(KEY);
+    } catch (e) { localStorage.removeItem(KEY); }
+    render();
+  }
+  function render() {
+    var t = $('target');
+    if (state.url) {
+      t.classList.remove('empty'); t.textContent = pretty(state.url);
+      $('actionsConnect').style.display = '';
+      $('pairCard').style.display = 'none';
+    } else {
+      t.classList.add('empty'); t.textContent = 'Sin configurar';
+      $('actionsConnect').style.display = 'none';
+      $('pairCard').style.display = '';
+    }
+  }
+  async function checkBio() {
+    var tag = $('bioTag');
+    if (!BioP) { tag.textContent = 'Biometria: no disponible (plugin)'; return; }
+    try {
+      var r = await BioP.checkBiometry();
+      state.bioAvailable = !!(r && r.isAvailable);
+      var names = { 1: 'TouchID', 2: 'FaceID', 3: 'huella', 4: 'rostro', 5: 'iris' };
+      tag.textContent = state.bioAvailable ? ('Biometria: ' + (names[r.biometryType] || (r.biometryType || 'disponible'))) : 'Biometria: no configurada en el dispositivo';
+    } catch (e) { tag.textContent = 'Biometria: no disponible'; }
+  }
+  var CANCEL_CODES = { userCancel: 1, systemCancel: 1, appCancel: 1, userFallback: 1, authenticationFailed: 1, biometryLockout: 1 };
+  async function authenticate() {
+    if (!state.bioAvailable || !BioP) return { ok: true, skipped: 'sin biometria' };
+    try {
+      await BioP.authenticate({
+        reason: 'Accede a tu DeepSeek Harness',
+        cancelTitle: 'Cancelar',
+        androidTitle: 'DSH Mobile',
+        androidSubtitle: 'Confirma tu identidad para conectar',
+        allowDeviceCredential: true,
+        androidBiometryStrength: 0,
+        androidConfirmationRequired: false
+      });
+      return { ok: true };
+    } catch (e) {
+      var code = (e && e.code) || '';
+      var msg = (e && e.message) || '';
+      if (CANCEL_CODES[code]) {
+        toast('Biometria: ' + (code === 'authenticationFailed' ? 'no reconocida, intenta de nuevo' : 'cancelada'));
+        return { ok: false };
+      }
+      toast('Biometria no disponible (' + (code || msg || 'desconocido') + '). Continuando...');
+      return { ok: true, skipped: code };
+    }
+  }
+  function go(url) {
+    var ok = validUrl(url);
+    if (!ok) { toast('URL no valida: usa http(s)://host:puerto/?token=...'); return; }
+    // guarda la URL completa (con token): permite reintentar el canje de cookie si la biometria falla
+    save(ok).then(function () {
+      authenticate().then(function (res) {
+        if (!res.ok) return;
+        var note = res.skipped ? ' (sin biometria)' : '';
+        document.body.innerHTML = '<div style="margin:40vh auto;text-align:center;color:#93a4b7">Conectando a ' + pretty(ok) + note + '…</div>';
+        if (OpenP) {
+          OpenP.open({ url: ok }).catch(function () { location.replace(ok); });
+        } else {
+          location.replace(ok);
+        }
+      });
+    });
+  }
+
+  function wire() {
+    $('btnSave').addEventListener('click', function () { go($('urlInput').value.trim()); });
+    $('btnConnect').addEventListener('click', function () { go(state.url); });
+    $('btnForget').addEventListener('click', function () { forget(); });
+    $('btnScan').addEventListener('click', async function () {
+      var P = ScanP;
+      if (!P) { toast('Escaneo no disponible en este entorno'); return; }
+      try {
+        var res = null;
+        if (typeof P.scanBarcode === 'function') {
+          res = await P.scanBarcode({ hint: 17, scanInstructions: 'Apunta al QR de DSH', scanButton: false });
+        } else if (typeof P.scan === 'function') {
+          res = await P.scan();
+        } else {
+          toast('El plugin de escaneo no expone una API compatible');
+          return;
+        }
+        var raw = (res && (res.ScanResult || res.rawValue)) ||
+                  (res && res.barcodes && res.barcodes[0] && res.barcodes[0].rawValue) || '';
+        if (!raw) { toast('No se detecto ningun QR'); return; }
+        $('urlInput').value = raw;
+        go(raw);
+      } catch (e) { toast('Error al escanear: ' + (e && e.message ? e.message : e)); }
+    });
+    $('btnBio').addEventListener('click', async function () { await checkBio(); await authenticate(); });
+    $('urlInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') go($('urlInput').value.trim()); });
+  }
+
+  function boot() {
+    wire();
+    checkBio();
+    load().catch(function () { render(); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
+</body>
+</html>
